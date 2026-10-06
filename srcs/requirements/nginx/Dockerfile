@@ -6,7 +6,7 @@ RUN mkdir -p /etc/nginx/ssl
 
 RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 		-keyout /etc/nginx/ssl/sel-khao.42.fr.key \
-		-out /etc/nginx/ssl/sel-khao.42.fr.ctr \
+		-out /etc/nginx/ssl/sel-khao.42.fr.crt \
 		-subj "/CN=sel-khao.42.fr"
 
 COPY conf/nginx.conf /etc/nginx/nginx.conf
