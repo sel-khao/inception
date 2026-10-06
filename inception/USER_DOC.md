@@ -1,110 +1,132 @@
-# User Documentation 👩‍💻
+# User Documentation
 
-This guide is for anyone who just wants to **use** the project: start it, open the website, and check that everything works. No Docker knowledge needed!
+This file is for someone who just wants to use the project: start it, open the website, log in, and check that everything works. No Docker knowledge is needed.
 
----
+## 1. What services are provided
 
-## 1. What does this stack provide?
+The stack has 3 services, each in its own container:
 
-| Service | What it is | Why it's there |
-|---|---|---|
-| **NGINX** | A web server | Receives all visitors on port **443 (HTTPS)** and is the *only* door into the infrastructure |
-| **WordPress + PHP-FPM** | The website itself | Runs the WordPress site and its admin panel |
-| **MariaDB** | A database | Stores all WordPress content (posts, users, settings) |
+- nginx: the web server. It receives all visitors on port 443 (HTTPS). It is the only way in from outside.
+- wordpress (with php-fpm): the website itself and its administration panel.
+- mariadb: the database. It stores the posts, the users and the settings of the website.
 
-Your data is saved in **two volumes**, so nothing is lost when you stop the project:
-- the **database** (MariaDB)
-- the **website files** (WordPress)
+The data is saved in 2 volumes, so nothing is lost when the project is stopped:
 
----
+- the database (MariaDB)
+- the website files (WordPress)
+
+On the host machine, both are stored in /home/selkhao/data.
 
 ## 2. Start and stop the project
 
-Everything is done from the **root of the project** (where the `Makefile` is).
+Run all commands from the root of the project (the folder with the Makefile).
 
-| Action | Command |
-|---|---|
-| ▶️ Start (build + run) | `make` |
-| ⏹️ Stop and remove containers | `make down` |
-| 🔄 Rebuild everything from scratch | `make re` |
-| 🧹 Delete everything, including data | `make fclean` |
+- Start (build and run): `make`
+- Stop and remove the containers: `make down`
+- Rebuild everything from scratch: `make re`
+- Delete everything, including the data: `make fclean`
 
-> ⚠️ `make fclean` **deletes your data** (database + website files). Only use it if you want a fresh start!
+Warning: `make fclean` and `make re` delete the data (database and website files). Use `make down` then `make` if you only want to stop and restart.
 
----
+After `make`, wait about 30 seconds. WordPress needs this time to install itself the first time. If you open the site too early you may see a 403 or 502 error. Wait a bit and reload.
 
-## 3. Access the website and the admin panel
+## 3. Access the website and the administration panel
 
-First time only — make sure the domain points to your machine. In `/etc/hosts` there must be this line:
+First time only: the domain name must point to your machine. This line must be in /etc/hosts:
 
 ```
-127.0.0.1   <login>.42.fr
+127.0.0.1   selkhao.42.fr
 ```
 
-Then:
+Then use these addresses:
 
-| What | Address |
-|---|---|
-| 🌐 Website | https://<login>.42.fr |
-| 🔐 Admin panel | https://<login>.42.fr/wp-admin |
+- Website: https://selkhao.42.fr
+- Login page: https://selkhao.42.fr/wp-login.php
+- Administration panel: https://selkhao.42.fr/wp-admin (it redirects to the login page if you are not logged in)
 
-💡 Your browser will show a **security warning**. That's normal: the certificate is self-signed (made by us, not by a public authority). Click *Advanced → Continue*.
+Your browser will show a security warning. This is normal: the certificate is self-signed (created by us, not by a public authority). Click on "Advanced" and then "Continue".
 
-❌ `http://` (port 80) does **not** work on purpose. Only HTTPS on port 443.
+http://selkhao.42.fr (port 80) does not work on purpose. Only HTTPS on port 443 is open.
 
----
+To log in: open the login page, type the username and the password of the administrator, and you arrive on the dashboard. From the dashboard you can edit pages (Pages > edit > Update) and moderate comments.
 
-## 4. Locate and manage credentials
+## 4. Locate and manage the credentials
 
-Passwords are **never** written in the Dockerfiles or in git. They live in local files:
+Passwords are never written in the Dockerfiles or in git. They are in local files:
 
-| File | Contains |
-|---|---|
-| `secrets/db_password.txt` | Password of the WordPress database user |
-| `secrets/db_root_password.txt` | Password of the MariaDB root user |
-| `secrets/credentials.txt` | WordPress admin / user passwords |
-| `srcs/.env` | Non-secret config: domain name, DB name, usernames, emails |
+- secrets/db_password.txt: password of the WordPress database user
+- secrets/db_root_password.txt: password of the MariaDB root user
+- secrets/credentials.txt: the WordPress passwords (administrator and normal user)
+- srcs/.env: settings that are not secret (domain name, database name, usernames, emails)
 
-To see a password:
+The usernames of the two WordPress users are in srcs/.env (look for the WP_ variables).
+
+To read a password:
+
 ```bash
 cat secrets/db_password.txt
 ```
 
-To **change** a password: edit the file, then rebuild with a fresh start:
+To change a password, edit the file and start again from zero, because the database remembers the old password:
+
 ```bash
-make fclean && make
+make fclean
+make
 ```
-(The database stores the old password, so a clean rebuild is needed.)
 
-> 🔒 These files must **never** be pushed to git (they're in `.gitignore`).
+To change only a WordPress user's password without rebuilding, you can run:
 
----
+```bash
+docker exec wordpress wp user update <username> --user_pass='NewPassword' --allow-root --path=/var/www/html
+```
 
-## 5. Check that everything is running
+(and then update the same password in the secrets file, so the file and reality match).
 
-**1. Are the 3 containers up?**
+These files must never be pushed to git. They are listed in .gitignore.
+
+## 5. Check that the services are running correctly
+
+1. Are the 3 containers up?
+
 ```bash
 docker ps
 ```
-You should see `nginx`, `wordpress` and `mariadb` with status **Up**.
 
-**2. Does the website answer?**
+You should see nginx, wordpress and mariadb with the status "Up".
+
+2. Does the website answer?
+
 ```bash
-curl -k -I https://<login>.42.fr
+curl -k -I https://selkhao.42.fr
 ```
-You should get `HTTP/1.1 200 OK` (or a redirect `301/302`).
 
-**3. Read the logs if something looks wrong**
+You should get `HTTP/1.1 200 OK` (or a redirect 301 / 302).
+
+3. Does HTTP stay closed?
+
+```bash
+curl -I http://selkhao.42.fr
+```
+
+This must fail (connection refused).
+
+4. Look at the logs if something seems wrong:
+
 ```bash
 docker logs nginx
 docker logs wordpress
 docker logs mariadb
 ```
 
-**4. Quick checklist ✅**
-- [ ] The 3 containers are `Up`
-- [ ] The website opens in the browser
-- [ ] I can log in to `/wp-admin`
-- [ ] A post I created is still there after `make down` + `make`
+Quick checklist:
 
-**Something broke?** → try `make re`. Still stuck? Look at the logs above.
+- the 3 containers are Up
+- the website opens in the browser (not the WordPress installation page)
+- I can log in at /wp-admin
+- a page I edited or a comment I wrote is still there after `make down` and `make`
+
+Common problems:
+
+- 403 or 502 right after `make`: WordPress is still installing. Wait 30 seconds.
+- The site does not open at all: check the line in /etc/hosts, then `docker ps`.
+- Still stuck: read the logs above, or try `make re` (this deletes the data).

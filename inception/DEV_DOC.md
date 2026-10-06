@@ -1,29 +1,30 @@
-# Developer Documentation 🛠️
+# Developer Documentation
 
-This guide explains how to set up, build, and manage the project from scratch, and also has a **cheat sheet** of commands and explanations that are handy for the evaluation.
-
----
+This file explains how to set up, build and manage the project from scratch. At the end there is a cheat sheet with explanations and commands that are useful for the evaluation.
 
 ## 1. Set up the environment from scratch
 
 ### Prerequisites
-- A Linux **virtual machine** (Debian/Ubuntu)
-- `docker`, `docker compose` (v2) and `make`
-- Your user in the `docker` group (or use `sudo`)
+
+- A Linux virtual machine (Debian or Ubuntu)
+- docker, docker compose (v2) and make
+- Your user in the docker group (or use sudo)
 
 ```bash
 sudo apt update && sudo apt install -y make docker.io docker-compose-v2
-sudo usermod -aG docker $USER      # then log out / log in
+sudo usermod -aG docker $USER     # then log out and log in again
 ```
 
 ### Domain name
+
 ```bash
 echo "127.0.0.1 selkhao.42.fr" | sudo tee -a /etc/hosts
 ```
 
-### Configuration files (not in git!)
+### Configuration files (not in git)
 
-**`srcs/.env`** — non-secret variables. Example (adapt the names to yours):
+srcs/.env contains the settings that are not secret. Example (adapt to your own file):
+
 ```env
 DOMAIN_NAME=selkhao.42.fr
 
@@ -33,230 +34,254 @@ MYSQL_USER=wpuser
 
 # WordPress
 WP_TITLE=Inception
-WP_ADMIN_USER=selkhao_boss        # must NOT contain "admin"/"administrator"
-WP_ADMIN_EMAIL=selkhao@student.42.fr
-WP_USER=selkhao_user
-WP_USER_EMAIL=user@student.42.fr
+WP_ADMIN_USER=<admin username, must NOT contain "admin" or "administrator">
+WP_ADMIN_EMAIL=<email>
+WP_USER=<second user>
+WP_USER_EMAIL=<email>
 ```
 
-**`secrets/`** — one file per secret (no trailing junk, just the password):
+The secrets folder has one file per password (only the password inside the file):
+
 ```
 secrets/db_password.txt
 secrets/db_root_password.txt
 secrets/credentials.txt
 ```
 
-**`.gitignore`** must contain:
+The .gitignore must contain:
+
 ```
 secrets/
 srcs/.env
 ```
 
 ### Data folders on the host
-The volumes store data in `/home/selkhao/data/`. The Makefile creates them:
-```bash
-mkdir -p /home/selkhao/data/mariadb /home/selkhao/data/wordpress
-```
 
----
+The volumes store their data in /home/selkhao/data. The Makefile creates the folders, but you can also do it by hand:
+
+```bash
+sudo mkdir -p /home/selkhao/data/mariadb /home/selkhao/data/wordpress
+```
 
 ## 2. Build and launch
 
 ```bash
-make            # = create data dirs + docker compose up -d --build
+make
 ```
 
-What the Makefile does (typical targets):
+The Makefile targets:
 
-| Target | What it does |
-|---|---|
-| `make` / `make all` | Creates the data folders, builds the images, starts the containers |
-| `make down` | `docker compose down` (stops + removes containers and network) |
-| `make clean` | Down + removes unused images/containers |
-| `make fclean` | Clean + removes volumes and the data in `/home/selkhao/data` |
-| `make re` | `fclean` then `all` |
+- make (or make all): creates the data folders, builds the images and starts the containers
+- make down: stops and removes the containers and the network
+- make clean: down, and removes unused images
+- make fclean: clean, and removes the volumes and the data in /home/selkhao/data
+- make re: fclean and then all
 
-Under the hood:
+Under the hood, make runs something like:
+
 ```bash
 docker compose -f srcs/docker-compose.yml --env-file srcs/.env up -d --build
 ```
 
----
+Startup order and timing: mariadb starts first, then wordpress waits until the database answers, downloads WordPress, creates wp-config.php, installs the site and creates the 2 users, and only then starts php-fpm. nginx is already running by that time. So for about 30 seconds after make you can see a 403 or a 502 from nginx. This is normal, just wait.
 
-## 3. Useful commands to manage containers and volumes
+## 3. Commands to manage the containers and the volumes
 
 ### Containers
+
 ```bash
-docker ps                         # running containers
-docker ps -a                      # all containers
-docker logs -f wordpress          # follow logs of a container
-docker exec -it mariadb bash      # open a shell inside a container
-docker compose -f srcs/docker-compose.yml restart nginx
+docker ps                                   # running containers
+docker ps -a                                # all containers
+docker logs -f wordpress                    # follow the logs of one container
+docker exec -it mariadb bash                # open a shell inside a container
 docker compose -f srcs/docker-compose.yml ps
+docker compose -f srcs/docker-compose.yml restart nginx
+docker compose -f srcs/docker-compose.yml up -d --build nginx    # rebuild only one service
 ```
 
 ### Images
+
 ```bash
-docker images                     # list images (names = service names, no "latest" tag in the Dockerfile!)
+docker images
 docker compose -f srcs/docker-compose.yml build --no-cache
 ```
 
 ### Volumes
+
 ```bash
 docker volume ls
-docker volume inspect srcs_db_data      # shows the real path on the host
-ls /home/selkhao/data/mariadb
-ls /home/selkhao/data/wordpress
+docker volume inspect srcs_mariadb_data      # the "device" line shows the host path
+docker volume inspect srcs_wordpress_data
+ls -la /home/selkhao/data/mariadb
+ls -la /home/selkhao/data/wordpress
 ```
 
 ### Network
+
 ```bash
 docker network ls
-docker network inspect srcs_inception   # shows the 3 containers attached
+docker network inspect <network name>        # the 3 containers are listed inside
 ```
 
-### Nuke everything (careful 💣)
+### Delete everything (careful)
+
 ```bash
+make fclean
+# or by hand:
 docker compose -f srcs/docker-compose.yml down -v
 docker system prune -af
 sudo rm -rf /home/selkhao/data/*
 ```
 
----
+## 4. Where the data is stored and how it persists
 
-## 4. Where is the data stored and how does it persist?
+- Database: /var/lib/mysql in the mariadb container, volume srcs_mariadb_data, host path /home/selkhao/data/mariadb
+- WordPress files: /var/www/html in the wordpress container, volume srcs_wordpress_data, host path /home/selkhao/data/wordpress
 
-| Data | Container path | Docker named volume | Host path |
-|---|---|---|---|
-| Database | `/var/lib/mysql` | `db_data` | `/home/selkhao/data/mariadb` |
-| WordPress files | `/var/www/html` | `wp_data` | `/home/selkhao/data/wordpress` |
+Both are Docker named volumes. They use the local driver with driver_opts (type: none, o: bind, device: /home/selkhao/data/...). So Docker manages them by name, and the files are really stored in the folder required by the subject.
 
-- Both are **named volumes** (not bind mounts in the compose service definition). They use the `local` driver with `driver_opts` (`type: none`, `o: bind`, `device: /home/selkhao/data/...`) so Docker manages them **and** the files land in the right host folder.
-- NGINX also mounts the WordPress volume (read-only is nice) because it needs to serve the static files (CSS, images, JS).
-- Data **survives** `make down` and container crashes. It's only deleted by `make fclean` / `down -v` + removing the host folders.
+nginx also mounts the WordPress volume, because it serves the static files (CSS, images, JS) itself.
 
----
+The data survives make down, a container crash and a reboot of the VM. It is only deleted by make fclean (or down -v and removing the host folders).
 
-## 5. 🎓 Evaluation cheat sheet
+## 5. Changing a port (practice for the evaluation)
 
-### Quick explanations (say it in your own words!)
+In every case, finish with `make re` (or at least a rebuild), then check with the commands in the cheat sheet. First find all the places where the port appears:
 
-**What is Docker, and how is it different from a VM?**
-Docker runs apps as isolated processes that **share the host kernel**. A VM emulates a whole machine with its own OS. Docker = lighter and faster.
+```bash
+grep -rn "3306" srcs/ Makefile
+```
 
-**What is Docker Compose?**
-A tool to define and run several containers (+ network + volumes) in one `docker-compose.yml` file, with one command.
+### MariaDB (3306 to a new port)
 
-**Why Dockerfiles instead of pulling images?**
-The subject wants us to build our own images from Debian so we understand what's inside. Only the base image (Debian) is pulled.
+4 places to change:
 
-**What is PID 1 and why no `tail -f` / `sleep infinity`?**
-The first process in a container is PID 1: when it stops, the container stops. It also receives the stop signals (SIGTERM). If PID 1 is a fake loop, the real service isn't managed properly (no clean shutdown, zombie processes). So each service runs **directly in the foreground** (`nginx -g "daemon off;"`, `php-fpm -F`, `mariadbd`). In scripts I use `exec` so the daemon *replaces* the script and becomes PID 1.
+1. `port = ...` in the mariadb .cnf file (under [mysqld])
+2. `EXPOSE` in the mariadb Dockerfile
+3. `WP_DB_HOST=mariadb:NEWPORT` in srcs/.env
+4. anything else that hardcodes the port (the grep shows it)
 
-**How do the services talk to each other?**
-Through the custom docker network, by **service name** (Docker's built-in DNS): WordPress connects to `mariadb:3306`, NGINX passes PHP to `wordpress:9000` via FastCGI.
+If WordPress was already installed, wp-config.php (in the volume) still has the old port. Fix it with:
 
-**Why is NGINX the only entrypoint?**
-Security: only port 443 is published to the host. WordPress (9000) and MariaDB (3306) are only reachable inside the docker network.
+```bash
+docker exec wordpress wp config set DB_HOST mariadb:NEWPORT --allow-root --path=/var/www/html
+```
 
-**Why TLS 1.2/1.3 only?**
-Older versions (SSL, TLS 1.0/1.1) are insecure. Configured in nginx with `ssl_protocols TLSv1.2 TLSv1.3;`.
+or rebuild from zero with make fclean && make.
 
-**Secrets vs env variables?**
-Env variables are visible with `docker inspect`; secrets are mounted as files in `/run/secrets/` and are safer for passwords.
+In the wordpress setup script, the host and the port must be split for the mysql client (-h mariadb -P NEWPORT). WP-CLI accepts host:port in one string for --dbhost.
 
-**What does `restart: unless-stopped` (or `always`) do?**
-Restarts the container automatically if it crashes (or after a reboot of the Docker daemon).
+### WordPress / php-fpm (9000 to a new port)
 
----
+3 places to change, and they must match:
+
+1. the listen directive of php-fpm (www.conf, or the sed in the wordpress Dockerfile)
+2. `EXPOSE` in the wordpress Dockerfile
+3. `fastcgi_pass wordpress:NEWPORT;` in the nginx conf
+
+If the two sides do not match, nginx shows 502 Bad Gateway and docker logs nginx says "connect() failed ... upstream".
+
+### nginx (443 to a new port)
+
+1. `listen NEWPORT ssl;` in the nginx conf
+2. `ports: - "NEWPORT:NEWPORT"` in docker-compose.yml
+3. open https://selkhao.42.fr:NEWPORT
 
 ### Commands to run live
 
-**1) Show the project is up**
+1. Show that the project is up
+
 ```bash
 docker ps
 docker compose -f srcs/docker-compose.yml ps
 ```
 
-**2) No forbidden stuff**
+2. No forbidden things
+
 ```bash
-grep -rn "network_mode\|links:\|--link" srcs/        # nothing
-grep -rn "tail -f\|sleep infinity\|while true" srcs/ # nothing
-grep -rn "latest" srcs/                              # nothing
-grep -n "networks" srcs/docker-compose.yml           # network line present
+grep -rn "network_mode\|links:\|--link" srcs/ Makefile      # nothing
+grep -rn "tail -f\|sleep infinity\|while true" srcs/        # nothing
+grep -rn "latest" srcs/                                     # nothing
+grep -n "networks" srcs/docker-compose.yml                  # the network line is there
+grep -rni "password" srcs/requirements/*/Dockerfile         # no real password
 ```
 
-**3) Network**
+3. Network
+
 ```bash
 docker network ls
-docker network inspect srcs_inception
+docker network inspect <network name>
 ```
 
-**4) Volumes**
+4. Volumes
+
 ```bash
 docker volume ls
-docker volume inspect srcs_db_data
-docker volume inspect srcs_wp_data
+docker volume inspect srcs_mariadb_data
+docker volume inspect srcs_wordpress_data
 ls -la /home/selkhao/data
 ```
 
-**5) Port 443 only / HTTP refused**
+5. Only port 443 is open
+
 ```bash
-curl -k -I https://selkhao.42.fr     # works
-curl -I http://selkhao.42.fr         # connection refused (port 80 closed)
+curl -k -I https://selkhao.42.fr      # works
+curl -I http://selkhao.42.fr          # connection refused
 ```
 
-**6) TLS versions**
+6. TLS versions
+
 ```bash
-openssl s_client -connect selkhao.42.fr:443 -tls1_2   # works
-openssl s_client -connect selkhao.42.fr:443 -tls1_3   # works
-openssl s_client -connect selkhao.42.fr:443 -tls1_1   # must FAIL
+openssl s_client -connect selkhao.42.fr:443 -tls1_2    # works
+openssl s_client -connect selkhao.42.fr:443 -tls1_3    # works
+openssl s_client -connect selkhao.42.fr:443 -tls1_1    # must fail
 ```
 
-**7) Processes / PID 1 of each container**
-```bash
-docker exec nginx ps aux          # PID 1 = nginx
-docker exec wordpress ps aux      # PID 1 = php-fpm
-docker exec mariadb ps aux        # PID 1 = mariadbd / mysqld
-```
-*(If `ps` isn't installed in the container, use `docker top nginx`.)*
+7. What runs as PID 1 in each container
 
-**8) Database: show the 2 WordPress users**
+```bash
+docker top nginx
+docker top wordpress
+docker top mariadb
+```
+
+8. Database: show the 2 WordPress users
+
 ```bash
 docker exec -it mariadb mariadb -u root -p
-# (type the root password from secrets/db_root_password.txt)
 SHOW DATABASES;
 USE wordpress;
 SELECT user_login, user_email FROM wp_users;
 ```
-or with WP-CLI (if installed in my wordpress image):
+
+or with WP-CLI:
+
 ```bash
-docker exec wordpress wp user list --path=/var/www/html --allow-root
+docker exec wordpress wp user list --allow-root --path=/var/www/html
 ```
 
-**9) Restart after crash**
+9. Restart after a crash
+
 ```bash
 docker kill wordpress
-docker ps          # a few seconds later it's back "Up"
+docker ps          # a few seconds later it is Up again
 ```
 
-**10) Persistence test**
-1. Log in to `/wp-admin`, write a post or a comment.
-2. `make down` then `make`.
-3. Reload the site → the post is still there ✅
+10. Persistence test
 
-**11) Check no password in Dockerfiles / git**
+- Log in to /wp-admin, edit a page and write a comment.
+- Reboot the VM (or make down), then run make again.
+- Wait 30 seconds and reload: the changes are still there.
+
+11. Nothing secret in git
+
 ```bash
-grep -rni "password" srcs/requirements/*/Dockerfile
 git ls-files | grep -E "secrets|\.env"       # must print nothing
 ```
 
----
+### "Modify the project" requests to be ready for
 
-### Possible "modify the project" requests (be ready)
-- **Change the port** NGINX listens on → edit `ports:` in compose + `listen` in nginx conf, then `docker compose up -d --build nginx`.
-- **Change a WordPress user / title** → edit `.env`, `make re`.
-- **Change the domain name** → `.env` + `/etc/hosts` + nginx `server_name` + the SSL certificate CN.
-- **Rebuild only one service** → `docker compose -f srcs/docker-compose.yml up -d --build nginx`.
-
-💡 Tip: if you don't remember something, **explain how you'd find it** (`docker logs`, `docker inspect`, the docs). That shows real understanding.
+- Change the port of mariadb, wordpress or nginx: see section 5, then make re.
+- Change a WordPress username or the site title: edit srcs/.env, then make fclean && make.
+- Change the domain name: .env, /etc/hosts, server_name in nginx, the certificate CN, then make fclean && make.
+- Rebuild only one service: `docker compose -f srcs/docker-compose.yml up -d --build nginx`.
